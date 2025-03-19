@@ -1,0 +1,29 @@
+{
+  "name": "handwavy",
+  "engines": {
+    "node": "22.x"
+  },
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@huggingface/transformers": "^3.4.0",
+    "@mediapipe/tasks-vision": "^0.10.21",
+    "body-parser": "^1.20.3",
+    "dotenv": "^16.4.7",
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "morgan": "^1.10.0",
+    "node-localstorage": "^3.0.5",
+    "socket.io": "^4.8.1"
+  }
+}

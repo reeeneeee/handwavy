@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en" style="height: 100%; margin: 0;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="icon" type="image/x-icon" href="./assets/favicon.ico" />
+    <title>~handwavy~</title>
+  </head>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+  <script defer src="./assets/js/face-api.min.js"></script>
+  <script>
+    window.API_KEY = '<%= apiKey %>';
+  </script>
+  <script type="module" defer src="./handwave.js"></script>
+  <link rel="stylesheet" href="./assets/css/style.css" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      position: relative;
+    }
+    body {
+      padding: 20px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .main-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      padding-top: 20px;
+      position: relative;
+      z-index: 1;
+    }
+    #gesture {
+      margin: 10px 0px;
+      padding: 10px;
+      background-color: #f0f0f0;
+      border-radius: 5px;
+      text-align: center;
+      font-size: 1.2em;
+      width: 100%;
+    }
+    .video-container {
+      position: relative;
+      width: 100%;
+      height: 600px;
+    }
+    .submit-button {
+      margin: 20px 0;
+      padding: 10px 20px;
+      font-size: 1.1em;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .submit-button:hover {
+      background-color: #45a049;
+    }
+    .transcription-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0;
+      font-size: 0.9em;
+      color: #666;
+    }
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background-color: #ccc;
+      transition: background-color 0.3s ease;
+    }
+    .status-indicator.active {
+      background-color: #4CAF50;
+    }
+  </style>
+  <body>
+    <div class="main-container">
+
+      <div class="video-container">
+        <video id="video" width="800" height="600" autoplay playsinline></video>
+      </div>
+
+      <h2 id="gesture" style="color: #ff0088;" width="100%"> press anything to begin handwaving </h2>
+      
+      <div class="transcription-status">
+        <div id="status-indicator" class="status-indicator"></div>
+        <span id="transcription-status-text"></span>
+      </div>
+
+      <div id="transcription" style="font-family: Courier New; font-weight: bold; margin: 20px 0px 20px 0px; padding: 10px; border: 1px solid #ccc; min-height: 30px;"></div>
+      
+      <div id="continuation" style="font-family: Courier New; margin: 20px 0px 20px 0px; padding: 10px; border: 1px solid #ccc; min-height: 30px;"></div>
+
+    </div>
+  </body>
+</html>
