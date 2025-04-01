@@ -4,8 +4,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export default async function handler(req, res) {
-  console.log('API route hit:', req.method, req.url);
-  
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -17,53 +15,57 @@ export default async function handler(req, res) {
 
   // Handle OPTIONS request for CORS
   if (req.method === 'OPTIONS') {
-    console.log('Handling OPTIONS request');
     res.status(200).end();
     return;
   }
 
-  if (req.method !== 'POST') {
-    console.log('Method not allowed:', req.method);
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method === 'GET') {
+    const headers = {
+      'Content-Type': 'text/event-stream',
+      'Connection': 'keep-alive',
+      'Cache-Control': 'no-cache'
+    };
+    res.writeHead(200, headers);
 
-  // Check for API key
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY is not set');
-    return res.status(500).json({ 
-      error: 'Server configuration error',
-      details: 'ANTHROPIC_API_KEY environment variable is not set'
-    });
-  }
-
-  console.log('Request body:', req.body);
-  const {transcription, style } = req.body;
-
-  try {
-    const message = `Please directly continue this fragment of a speech
-    in a ${style} style. PLEASE do not include
-    any commentary or preamble, and exclude the fragment itself: "${transcription}"`;
+    const transcription = req.query.transcription;
+    const style = req.query.style;
     
-    console.log('Creating Anthropic client');
-    const anthropic = new Anthropic({
-      apiKey: apiKey
-    });
+    try {
+      const message = `You are a helpful co-presenter, and are jumping in to continue
+    a speech once the current speaker starts handwaving.
+    Please give a direct continuation of this fragment of a speech in a ${style} style.
+    DO NOT include any stage directions, commentary, or preamble, and exclude the fragment itself: "${transcription}"`;
+      
+      let fullMessage = '';
+      const anthropic = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY
+      });
 
-    console.log('Sending message to Anthropic');
-    const msg = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: message}],
-    });
-    
-    console.log('Got response from Anthropic');
-    return res.status(200).json({ continuation: msg.content[0].text });
-  } catch (error) {
-    console.error("Detailed error:", error);
-    return res.status(500).json({ 
-      error: error.message,
-      details: error.stack 
-    });
+      const stream = await anthropic.messages
+      .stream({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'user',
+            content: message,
+          },
+        ],
+      })
+      .on('text', (text) => {
+        fullMessage += text;
+        const data = `data: ${JSON.stringify(text)}\n\n`;
+        res.write(data);
+      });
+      
+    } catch (error) {
+      console.error("Detailed error:", error);
+      res.status(500).json({ 
+        error: error.message,
+        details: error.stack 
+      });
+    }
+  } else {
+    res.status(405).json({ error: 'Method not allowed' });
   }
 } 

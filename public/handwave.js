@@ -1,11 +1,7 @@
 import { GestureRecognizer, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js';
-
-window.speechSynthesis.cancel();
-
 const video = document.getElementById("video");
 let canvas;
 let transcriptEnabled = false; // Start with transcription disabled
-
 
 // Function: start webcam
 function startWebcam() {
@@ -39,7 +35,6 @@ function updateTranscriptionStatus(enabled) {
     // clear transcript and ui
     finalTranscript = '';
     gestureText.textContent = '';
-    transcriptionDiv.innerHTML = `<p style="color: #000;"></p>`;
 
     video.style.filter = 'blur(3px)'; // Remove grayscale filter
     
@@ -68,37 +63,11 @@ function updateTranscriptionStatus(enabled) {
 
 // Function: speak text
 function say(text) {
-  console.log("saying " + text + " and disabling transcription");
-
-  updateTranscriptionStatus(false); //disable transcription while speaking
-
-  // Clear UI
-  gestureText.textContent = '';
-
-  // Set speech synthesis properties
+  console.log("saying " + text);
   msg.rate = 1.5;
   msg.pitch = 1;
   msg.text = text;
-  
-  // Make sure we have the onend handler set before speaking
-  msg.onend = function() {
-    console.log("Speech synthesis ended, re-enabling transcription");
-    updateTranscriptionStatus(true);
-    
-    // Restart recognition if it's not running
-    try {
-      recognition.start();
-    } catch (error) {
-      // Ignore "already started" errors
-      if (error.name !== 'InvalidStateError') {
-        console.error('Error restarting recognition after speech:', error);
-      }
-    }
-  };
-  
   window.speechSynthesis.cancel();
-
-  // Speak text
   window.speechSynthesis.speak(msg);
 }
 
@@ -117,7 +86,16 @@ const allVoicesObtained = new Promise(function (resolve, reject) {
   }
 });
 
-allVoicesObtained.then((voices) => (msg.voice = voices[0]));
+// Modify this part to select a better voice
+allVoicesObtained.then((voices) => {
+  console.log("Available voices:", voices.map(v => `${v.name} (${v.lang})`));
+  // Try to find an English voice
+  const englishVoice = voices.find(voice => 
+    voice.lang.startsWith('en-') && !voice.name.includes('Microsoft')
+  ) || voices[0];
+  console.log("Selected voice:", englishVoice.name);
+  msg.voice = englishVoice;
+});
 
 // Initialize gesture recognizer
 let gestureRecognizer, handwaveRecognizer;
@@ -148,7 +126,6 @@ async function createGestureRecognizer() {
 }
 
 import { Anthropic } from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.10.2/+esm';
-
 let anthropic;
 
 if (!API_KEY) {
@@ -330,7 +307,11 @@ recognition.onresult = (event) => {
     console.log("Skipping transcription");
     return;
   }
-  
+
+  if (finalTranscript === '') {
+    document.getElementById('transcription').innerHTML = `<p style="color: #000;"></p>`;
+  }
+
   const results = event.results;
   let interimTranscript = '';
 
@@ -355,8 +336,7 @@ recognition.onresult = (event) => {
 // Handle errors
 recognition.onerror = (event) => {
   console.error('Speech recognition error:', event.error);
-  // transcriptionDiv.innerHTML += `<p style="color: red;">Error: ${event.error}</p>`;
-  
+
   // If the error is fatal, try to restart recognition
   if (event.error === 'network' || event.error === 'service-not-allowed') {
     setTimeout(() => {
@@ -403,12 +383,8 @@ if (document.readyState === 'loading') {
 
 // Draw video and canvas
 video.addEventListener("play", async () => {
-      // Initialize speech synthesis
-      window.speechSynthesis.cancel();
-      
       if (!transcriptEnabled) {
         msg.text = "Please type any key to enable transcription.";
-        // say(msg.text)
         updateTranscriptionStatus(true);
       }
 
@@ -446,11 +422,12 @@ video.addEventListener("play", async () => {
 
     // Gesture detection and hand landmarks
     await detectGestures();
-  }, 100);
+  }, 500);
 });
 
 window.submitToHandwave = async function() {
-  const transcription = document.getElementById('transcription').textContent;
+  // Clear out conitnuation text
+  document.getElementById('continuation').innerHTML = `<p style="color: #000;"></p>`;
 
   // Update UI
   gestureText.textContent = 'thinking...';
@@ -460,46 +437,129 @@ window.submitToHandwave = async function() {
   const styleOverride = urlParams.get('style');
   let style = styleOverride || "funny and whimsical";
   
-  console.log('Submitting to handwave:', {
+  if (window.currentSource) {
+    window.currentSource.close();
+  }
+  const transcription = document.getElementById('transcription').textContent;
+  console.log('Generating continuation for:', {
     transcription,
     style,
     url: '/api/handwave'
   });
+  // Creating EventSource connection
+  const source = new EventSource(`/api/handwave?transcription=${transcription}&style=${style}`);
+  window.currentSource = source;
 
-  try {
-    const response = await fetch('/api/handwave', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        transcription: transcription,
-        style: style
-      })
-    });
-    
-    console.log('Response status:', response.status);
-    const responseText = await response.text();
-    console.log('Response text:', responseText);
-    
-    if (!response.ok) {
-      throw new Error(`Network response was not ok: ${response.status} ${responseText}`);
-    }
-    
-    const result = JSON.parse(responseText);
-    
-    // Speak continuation and update UI
-    if (result.continuation) {
-      const continuationDiv = document.getElementById('continuation');
-      continuationDiv.textContent = result.continuation;
+let continuationDiv = document.getElementById('continuation');
+let currentUtterance = null;
+let currentChunk = '';
+let lastBit = '';
+const synth = window.speechSynthesis;
 
-      say(result.continuation);
-    }
-  } catch (error) {
-    console.error('Error:', error);
-    const continuationDiv = document.getElementById('continuation');
-    continuationDiv.textContent = `Error: ${error.message}`;
+// On receiving each SSE, speak the next utterance/update next speech chunk as appropriate
+source.onmessage = function(event) {
+  updateTranscriptionStatus(false);
+  // console.log('Received message:', event.data);
+  
+  // Process message (previous last bit + new text - last bit, so words aren't split up)
+  const messageTextRaw = lastBit + JSON.parse(event.data);
+  const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
+  lastBit = messageTextRaw.split(' ').slice(-1)[0];
+
+  continuationDiv.textContent += JSON.parse(event.data);
+  currentChunk += messageText;
+
+  if (!synth.speaking && currentChunk.length > 0) {
+    // If nothing is speaking, start speaking immediately
+    currentUtterance = new SpeechSynthesisUtterance(currentChunk);
+    currentUtterance.rate = 1.5;
+    currentUtterance.pitch = 1;
+    
+    // Set up onend handler before speaking
+    currentUtterance.onend = () => {
+      //console.log('Utterance finished');
+      // If we've accumulated more text while speaking, speak it now
+      if (currentChunk || lastBit) {  // Check for either accumulated text OR lastBit
+        const textToSpeak = currentChunk + ' ' + lastBit;  // Include lastBit
+        const nextUtterance = new SpeechSynthesisUtterance(textToSpeak);
+        nextUtterance.rate = 1.5;
+        nextUtterance.pitch = 1;
+        nextUtterance.onend = currentUtterance.onend; // Preserve the onend handler
+        currentUtterance = nextUtterance;
+        console.log('speaking accumulated chunk:', textToSpeak);
+        currentChunk = ''; // Clear the chunk before speaking
+        lastBit = '';
+        synth.speak(currentUtterance);
+      }
+    };
+
+    currentChunk = ''; // Clear the chunk before speaking
+    synth.speak(currentUtterance);
   }
+};
+
+
+// Initialize speech synthesis when the page loads
+document.addEventListener('DOMContentLoaded', () => {
+  // Chrome requires a user interaction before allowing speech
+  const initSpeech = () => {
+    // Try to initialize voices
+    window.speechSynthesis.getVoices();
+    
+    // Create and immediately cancel an utterance to initialize the system
+    const testUtterance = new SpeechSynthesisUtterance('speech initialized');
+    window.speechSynthesis.speak(testUtterance);
+    
+    // Remove the event listeners once initialized
+    document.removeEventListener('click', initSpeech);
+    document.removeEventListener('keydown', initSpeech);
+    document.removeEventListener('touchstart', initSpeech);
+  };
+
+  // Add listeners for user interaction
+  document.addEventListener('click', initSpeech);
+  document.addEventListener('keydown', initSpeech);
+  document.addEventListener('touchstart', initSpeech);
+});
+
+
+  // try {
+  //   const response = await fetch(`/api/handwave?transcription=${encodeURIComponent(transcription)}&style=${encodeURIComponent(style)}`, {
+  //     method: 'GET',
+  //     headers: {
+  //       'Content-Type': 'application/json',
+  //     }
+  //   });
+    
+  //   console.log('Response status:', response.status);
+  //   const responseText = await response.text();
+  //   console.log('Response text:', responseText);
+    
+  //   if (!response.ok) {
+  //     throw new Error(`Network response was not ok: ${response.status} ${responseText}`);
+  //   }
+    
+  //   const result = JSON.parse(responseText);
+    
+  //   // Speak continuation and update UI
+  //   if (result.continuation) {
+  //     const continuationDiv = document.getElementById('continuation');
+  //     continuationDiv.textContent = result.continuation;
+
+  //     //say(result.continuation);
+  //     console.log('saying:', result.continuation);
+  //     var msg = new SpeechSynthesisUtterance();
+  //     msg.rate = 1.5;
+  //     msg.pitch = 1;
+  //     msg.text = result.continuation;
+  //     window.speechSynthesis.speak(msg);
+
+  //   }
+  // } catch (error) {
+  //   console.error('Error:', error);
+  //   const continuationDiv = document.getElementById('continuation');
+  //   continuationDiv.textContent = `Error: ${error.message}`;
+  // }
 };
 
 // Add these variables at the top with other variables

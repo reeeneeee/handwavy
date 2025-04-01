@@ -31,23 +31,51 @@ app.get("/", (req, res) => {
 });
 
 // Add API route handler for local development
-app.post("/api/handwave", express.json(), async (req, res) => {
-  const {transcription, style } = req.body;
+app.get("/api/handwave", async (req, res) => {
+  const headers = {
+    'Content-Type': 'text/event-stream',
+    'Connection': 'keep-alive',
+    'Cache-Control': 'no-cache'
+  };
+  res.writeHead(200, headers);
+  console.log('in api/handwave')
+  const transcription = req.query.transcription;
+  const style = req.query.style;
   try {
     const message = `You are a helpful co-presenter, and are jumping in to continue
     a speech once the current speaker starts handwaving.
     Please give a direct continuation of this fragment of a speech in a ${style} style.
-    DO NOT include any commentary or preamble, and exclude the fragment itself: "${transcription}"`;
+    DO NOT include any stage directions, commentary, or preamble, and exclude the fragment itself: "${transcription}"`;
     console.log('sending Anthropic message:', message);
-    const msg = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
+
+    let startTime = performance.now();
+    let firstChunkReceived = false;
+    const stream = anthropic.messages
+    .stream({
+      model: 'claude-3-haiku-20240307',
+      //model: 'claude-3-5-sonnet-20241022',
       max_tokens: 1024,
-      messages: [{ role: "user", content: message}],
+      messages: [
+        {
+          role: 'user',
+          content: message,
+        },
+      ],
+    })
+    .on('text', (text) => {
+      console.log('received text:', text)
+      if (!firstChunkReceived) {
+        firstChunkReceived = true;
+        console.log(`First chunk received in ${performance.now() - startTime}ms`);
+      }
+
+      const data = `data: ${JSON.stringify(text)}\n\n`;
+      res.write(data);
+
+      //res.write(`${JSON.stringify(text)}\n\n`);
     });
-
-    res.json({ continuation: msg.content[0].text });
-
-    // console.log(`sending llama3.2 message ${message}`)
+  
+    // console.log(`sending local llm message ${message}`)
     // const response = await fetch('http://localhost:11435/api/generate', {
     //   method: 'POST',
     //   headers: {

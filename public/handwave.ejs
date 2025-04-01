@@ -4,14 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="icon" type="image/x-icon" href="./assets/favicon.ico" />
-    <title>~handwavy~</title>
+  <title>~handwavy~</title>
   </head>
   <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
   <script defer src="./assets/js/face-api.min.js"></script>
+  <script type="module" defer src="./handwave.js"></script>
   <script>
     window.API_KEY = '<%= apiKey %>';
+    navigator.mediaDevices
+    .getUserMedia({ video: true, audio: true })
+    .then((localMediaStream) => {
+      const video = document.querySelector("video");
+      video.srcObject = localMediaStream;
+    })
+    .catch((error) => {
+      console.log("Rejected!", error);
+    });
   </script>
-  <script type="module" defer src="./handwave.js"></script>
   <link rel="stylesheet" href="./assets/css/style.css" />
   <style>
     html, body {
@@ -51,19 +60,17 @@
       position: relative;
       width: 100%;
       height: 600px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
     }
-    .submit-button {
-      margin: 20px 0;
-      padding: 10px 20px;
-      font-size: 1.1em;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    .submit-button:hover {
-      background-color: #45a049;
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      max-width: 800px;
+      margin: auto;
     }
     .transcription-status {
       display: flex;
@@ -88,10 +95,10 @@
     <div class="main-container">
 
       <div class="video-container">
-        <video id="video" width="800" height="600" autoplay playsinline></video>
+        <video id="video" autoplay playsinline></video>
       </div>
 
-      <h2 id="gesture" style="color: #ff0088;" width="100%"> press anything to begin handwaving </h2>
+      <h2 id="gesture" style="color: #ff0088;" width="100%"> begin speaking whenever you're ready <br> handwave 🫴 to automatically continue the thought </h2>
       
       <div class="transcription-status">
         <div id="status-indicator" class="status-indicator"></div>
