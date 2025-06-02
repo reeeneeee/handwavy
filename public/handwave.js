@@ -181,9 +181,9 @@ let isProcessingHandwave = false;
 
 // Function to detect gestures
 async function detectGestures() {
-  if (finalTranscript === "") {
-    return;
-  }
+  // if (finalTranscript === "") {
+  //   return;
+  // }
 
   if (!gestureRecognizer || !handwaveRecognizer) {
     console.log("Gesture recognizers not initialized");
