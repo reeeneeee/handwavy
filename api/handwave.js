@@ -38,7 +38,7 @@ export default async function handler(req, res) {
       
       let fullMessage = '';
       const anthropic = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY
+        apiKey: process.env.VERCEL_ANTHROPIC_API_KEY
       });
 
       const stream = await anthropic.messages

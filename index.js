@@ -16,17 +16,17 @@ app.set("view engine", "ejs");
 app.set("views", __dirname + "/public");
 
 dotenv.config();
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error("ANTHROPIC_API_KEY is not set in environment variables");
+if (!process.env.VERCEL_ANTHROPIC_API_KEY) {
+  console.error("VERCEL_ANTHROPIC_API_KEY is not set in environment variables");
   process.exit(1);
 }
 const anthropic = new Anthropic({
-  apiKey: process.env["ANTHROPIC_API_KEY"]
+  apiKey: process.env["VERCEL_ANTHROPIC_API_KEY"]
 });
 
 app.get("/", (req, res) => {
   res.render(__dirname + "/public/handwave.ejs", {
-    apiKey: process.env["ANTHROPIC_API_KEY"]
+    apiKey: process.env["VERCEL_ANTHROPIC_API_KEY"]
   });
 });
 
@@ -52,8 +52,8 @@ app.get("/api/handwave", async (req, res) => {
     let firstChunkReceived = false;
     const stream = anthropic.messages
     .stream({
-      model: 'claude-3-haiku-20240307',
-      //model: 'claude-3-5-sonnet-20241022',
+      // model: 'claude-3-haiku-20240307',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 1024,
       messages: [
         {
@@ -71,33 +71,7 @@ app.get("/api/handwave", async (req, res) => {
 
       const data = `data: ${JSON.stringify(text)}\n\n`;
       res.write(data);
-
-      //res.write(`${JSON.stringify(text)}\n\n`);
     });
-  
-    // console.log(`sending local llm message ${message}`)
-    // const response = await fetch('http://localhost:11435/api/generate', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Content-Type': 'application/json',
-    //   },  
-    //   body: JSON.stringify(
-    //     {             
-    //       "model": "smollm2:135m",              
-    //       // "model": "llama3.2:1b", // slow
-    //       // "model": "deepseek-r1:1.5b", //slowest
-          
-    //       "prompt": message, 
-    //       "stream": false
-    //     }
-    // )
-    // });
-    // const data = await response.json();
-    // const msg = data.response;
-    
-    // console.log("LLM response:", msg); // Debug log
-    // res.json({ continuation: msg });
-    
   } catch (error) {
     console.error("Detailed error:", error); // Debug log
     res.status(500).json({ 

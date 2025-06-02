@@ -209,8 +209,12 @@ async function detectGestures() {
       lastGesture = gesture.categoryName;
       lastHandwave = handwave.categoryName;
     }
-
-    if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
+    if (gesture.categoryName === "Open_Palm") {   
+      gestureText.textContent = "open palm detected";
+      console.log("open palm detected, cancelling speech synthesis and restarting transcription");
+      window.speechSynthesis.cancel();
+      updateTranscriptionStatus(true);
+    } else if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
         gestureText.textContent = "handwave detected";
         
         // Check if we're not already processing a handwave and cooldown has passed
@@ -413,9 +417,9 @@ video.addEventListener("play", async () => {
 
   // draw detections every 100ms
   setInterval(async () => {
-    if (!transcriptEnabled) {
-      return;
-    }
+    // if (!transcriptEnabled) {
+    //   return;
+    // }
 
     // Clear the canvas
     canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);

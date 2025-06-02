@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     
     // Render the template
     const html = ejs.render(template, {
-      apiKey: process.env.ANTHROPIC_API_KEY
+      apiKey: process.env.VERCEL_ANTHROPIC_API_KEY
     });
 
     // Set the content type and send the response
