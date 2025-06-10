@@ -1,7 +1,27 @@
 import { GestureRecognizer, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js';
+
 const video = document.getElementById("video");
 let canvas;
+
 let transcriptEnabled = false; // Start with transcription disabled
+let lastGesture = "";
+let lastHandwave = "";
+let isSpeaking = false;
+let speechQueue = [];
+let currentChunk = '';
+let lastBit = '';
+let currentAudio = null; // Add this with other variables at the top
+let audioQueue;
+const synth = window.speechSynthesis;
+
+// Set continuation style
+const urlParams = new URLSearchParams(window.location.search);
+const styleOverride = urlParams.get('style');
+let style = styleOverride || "funny and whimsical";
+const voiceId = urlParams.get('voiceId');
+
+// Add at the top with other variables
+let speechSynthesisInitialized = false;
 
 // Function: start webcam
 function startWebcam() {
@@ -61,41 +81,142 @@ function updateTranscriptionStatus(enabled) {
   }
 }
 
-// Function: speak text
-function say(text) {
-  console.log("saying " + text);
-  msg.rate = 1.5;
-  msg.pitch = 1;
-  msg.text = text;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(msg);
+// Function to play audio from our TTS endpoint
+async function playAudio(text) {
+  // Don't try to play empty text
+  if (!text || text.trim().length === 0) {
+    console.log('Skipping empty text');
+    return;
+  }
+
+  try {
+    console.log('Playing text:', text); // Debug log
+    const response = await fetch(`/api/tts?text=${encodeURIComponent(text.trim())}&voiceId=${voiceId}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    // Create an audio element and play the stream
+    const audio = new Audio();
+    currentAudio = audio; // Store reference to current audio
+    audio.src = URL.createObjectURL(await response.blob());
+    
+    // Return a promise that resolves when the audio finishes playing
+    return new Promise((resolve) => {
+      audio.onended = () => {
+        currentAudio = null; // Clear reference when audio ends
+        resolve();
+      };
+      audio.play();
+    });
+  } catch (error) {
+    console.error('Error playing audio:', error);
+  }
 }
 
-// Set voice to AVA
-var msg = new SpeechSynthesisUtterance();
+// Function to process the speech queue
+async function processSpeechQueue() {
+  if (isSpeaking || speechQueue.length === 0) return;
+  
+  isSpeaking = true;
+  updateTranscriptionStatus(false);
+  
+  
+  
+  while (speechQueue.length > 0) {
+    const chunk = speechQueue.shift();
+    if (!chunk || chunk.trim().length === 0) continue;
 
-const allVoicesObtained = new Promise(function (resolve, reject) {
-  let voices = window.speechSynthesis.getVoices();
-  if (voices.length !== 0) {
-    resolve(voices);
-  } else {
-    window.speechSynthesis.addEventListener("voiceschanged", function () {
-      voices = window.speechSynthesis.getVoices();
-      resolve(voices);
-    });
+    if (voiceId) {
+      let stopCharMatch = chunk.match(new RegExp('[\\.\\!\\?]+'));
+      if (stopCharMatch != null) {
+        console.log('stop chars found, speaking', chunk);
+        // Only include lastBit if it's not empty
+        let chunkToSpeak = (lastBit ? lastBit + ' ' : '') + chunk.slice(0, stopCharMatch.index + 1) + stopCharMatch[0];
+        lastBit = chunk.slice(stopCharMatch.index + stopCharMatch[0].length, chunk.length);
+
+        console.log('chunkToSpeak is:', chunkToSpeak);
+        console.log('reset lastBit to:', lastBit);
+        updateTranscriptionStatus(false);
+
+        // Make API call immediately and add to audio queue
+        try {
+          console.log('adding audio for chunk to queue: ', chunkToSpeak);
+            const response = await fetch(`/api/tts?text=${encodeURIComponent(chunkToSpeak.trim())}&voiceId=${voiceId}`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const audio = new Audio();
+            audio.src = URL.createObjectURL(await response.blob());
+
+            audio.onended = () => {
+              currentAudio = null;
+              let nextAudio = audioQueue.shift();
+              if (nextAudio) {
+                nextAudio.play();
+              }
+            }
+
+            audio.onplay = () => {
+              currentAudio = audio;
+            }
+
+            if (currentAudio == null) {
+              audio.play();
+            } else {
+              audioQueue.push(audio);
+            }
+
+            console.warn('audioQueue:', audioQueue);
+        } catch (error) {
+            console.error('Error preparing audio:', error);
+        }
+      } else {
+        console.log('no period, adding to lastBit:', chunk);
+        lastBit += chunk;
+      }
+    } else {
+      console.log('processing with speechsynthesis default')
+      const messageTextRaw = lastBit + chunk;
+      const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
+      lastBit = messageTextRaw.split(' ').slice(-1)[0];
+
+      currentChunk += messageText;
+      if (!synth.speaking && currentChunk.length > 0) {
+        console.log('synth is not speaking and chunk is not empty:', currentChunk);
+        // If nothing is speaking, start speaking immediately
+        let currentUtterance = new SpeechSynthesisUtterance(currentChunk);
+        currentUtterance.rate = 1.5;
+        currentUtterance.pitch = 1;
+        synth.speak(currentUtterance);
+        // Set up onend handler before speaking
+        currentUtterance.onend = () => {
+          console.log('Utterance finished');
+          // If we've accumulated more text while speaking, speak it now
+          if (currentChunk || lastBit) {  // Check for either accumulated text OR lastBit
+            console.log('speaking accumulated chunk:', currentChunk);
+            const textToSpeak = currentChunk + ' ' + lastBit;  // Include lastBit
+            const nextUtterance = new SpeechSynthesisUtterance(textToSpeak);
+            nextUtterance.rate = 1.5;
+            nextUtterance.pitch = 1;
+            nextUtterance.onend = currentUtterance.onend; // Preserve the onend handler
+            currentUtterance = nextUtterance;
+            console.log('speaking accumulated chunk:', textToSpeak);
+            currentChunk = ''; // Clear the chunk before speaking
+            lastBit = '';
+            synth.speak(currentUtterance);
+          }
+          currentChunk = ''; // Clear the chunk before speaking
+          
+       }
+      }
+    }
   }
-});
-
-// Modify this part to select a better voice
-allVoicesObtained.then((voices) => {
-  console.log("Available voices:", voices.map(v => `${v.name} (${v.lang})`));
-  // Try to find an English voice
-  const englishVoice = voices.find(voice => 
-    voice.lang.startsWith('en-') && !voice.name.includes('Microsoft')
-  ) || voices[0];
-  console.log("Selected voice:", englishVoice.name);
-  msg.voice = englishVoice;
-});
+  
+  isSpeaking = false;
+  // Reset transcription status if no audio is playing and queue is empty
+  if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0) {
+    updateTranscriptionStatus(true);
+  }
+}
 
 // Initialize gesture recognizer
 let gestureRecognizer, handwaveRecognizer;
@@ -122,17 +243,6 @@ async function createGestureRecognizer() {
     },
     runningMode: "VIDEO",
     numHands: 2
-  });
-}
-
-import { Anthropic } from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.10.2/+esm';
-let anthropic;
-
-if (!API_KEY) {
-  console.error("ANTHROPIC_API_KEY is not set in environment variables");
-} else {
-  anthropic = new Anthropic({
-    apiKey: window.API_KEY
   });
 }
 
@@ -178,13 +288,10 @@ function drawHandLandmarks(ctx, landmarks) {
 const gestureText = document.getElementById("gesture");
 // Add a flag to track if we're currently processing a handwave
 let isProcessingHandwave = false;
+let lastHandwaveTime = 0;
 
 // Function to detect gestures
 async function detectGestures() {
-  // if (finalTranscript === "") {
-  //   return;
-  // }
-
   if (!gestureRecognizer || !handwaveRecognizer) {
     console.log("Gesture recognizers not initialized");
     return;
@@ -202,35 +309,71 @@ async function detectGestures() {
     handwaveResults && handwaveResults.gestures && handwaveResults.gestures.length > 0) {
     const gesture = gestureResults.gestures[0][0];
     const handwave = handwaveResults.gestures[0][0];
-    
-    // Only log when gesture changes to reduce console spam
+
     if (gesture.categoryName !== lastGesture || handwave.categoryName !== lastHandwave) {
       console.log("Detected gesture: ", gesture.categoryName, " | ", handwave.categoryName);
       lastGesture = gesture.categoryName;
       lastHandwave = handwave.categoryName;
+
+      if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {  
+        lastHandwaveTime = startTimeMs;
+      }
     }
-    if (gesture.categoryName === "Open_Palm") {   
-      gestureText.textContent = "open palm detected";
-      console.log("open palm detected, cancelling speech synthesis and restarting transcription");
-      window.speechSynthesis.cancel();
-      updateTranscriptionStatus(true);
-    } else if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
-        gestureText.textContent = "handwave detected";
+    
+    // START GENERATING
+    if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
+      gestureText.textContent = "🫴 detected";
+
+      // Check if we're not already processing a handwave and cooldown has passed
+      if (!isProcessingHandwave
+      ) {
+        // Set the flag immediately to prevent multiple calls
+        isProcessingHandwave = true;
+        lastApiCallTime = startTimeMs;
+        console.log("commencing handwaving!");           
         
-        // Check if we're not already processing a handwave and cooldown has passed
-        if (!isProcessingHandwave && startTimeMs - lastApiCallTime > API_CALL_COOLDOWN) {
-          isProcessingHandwave = true;
-          lastApiCallTime = startTimeMs;
-          console.log("commencing handwaving!");           
-          
-          try {
-            await window.submitToHandwave();
-          } finally {
-            // Reset the flag when processing is complete
-            isProcessingHandwave = false;
-          }
+        try {
+          await window.generateContinuation();
+        } catch (error) {
+          console.error("Error in handwave processing:", error);
+          // Reset the flag on error
+          isProcessingHandwave = false;
+          lastApiCallTime = 0; // Reset the cooldown timer on error
+        } finally {
+          // Reset the flag when processing is complete
+          isProcessingHandwave = false;
         }
+      } else {
+        const timeSinceLastCall = startTimeMs - lastApiCallTime;
+        console.log(`Skipping handwave - ${isProcessingHandwave ? 'already processing' : `cooldown active (${Math.round(timeSinceLastCall/1000)}s remaining)`}`);
+        console.log('time since handwave started', startTimeMs - lastHandwaveTime);
+      }
+    } else if (gesture.categoryName === "Open_Palm") {   // STOP SPEAKING
+      gestureText.textContent = "✋ detected";
+      console.log("open palm detected, stopping current audio and restarting transcription");
+      
+      // reset last handwave time
+      lastHandwaveTime = Infinity;
+
+      // Cancel any ongoing speech synthesis or audio
+      window.speechSynthesis.cancel();
+      if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+      isSpeaking = false;
+      // Clear the speech queue
+      speechQueue = [];
+
+      // Reset flags
+      isProcessingHandwave = false;
+      lastApiCallTime = 0; // Reset the cooldown timer on error
+      document.getElementById('transcription').innerHTML = '';
+      document.getElementById('continuation').innerHTML = '';
+      updateTranscriptionStatus(true);
     } else {
+      lastHandwaveTime = Infinity;
+
       gestureText.textContent = "";
     }
   }
@@ -243,9 +386,6 @@ async function detectGestures() {
     }
   }
 }
-
-// Add at the top with other variables
-let speechSynthesisInitialized = false;
 
 // Initialize speech synthesis
 function initializeSpeechSynthesis() {
@@ -303,6 +443,7 @@ recognition.maxAlternatives = 1;
 
 // Get the transcription display element
 const transcriptionDiv = document.getElementById('transcription');
+let interimTranscript = '';
 let finalTranscript = '';
 
 // Handle speech recognition results
@@ -331,9 +472,10 @@ recognition.onresult = (event) => {
   // Update the transcription display
   if (interimTranscript) {
     transcriptionDiv.innerHTML = `<p style="color: #000;">${interimTranscript}</p>`;
-  }
-  if (finalTranscript) {
+  } else if (finalTranscript) {
     transcriptionDiv.innerHTML = `<p style="color: #000;">${finalTranscript}</p>`;
+  } else {
+    transcriptionDiv.innerHTML = `<p style="color: #000;"></p>`;
   }
 };
 
@@ -372,7 +514,6 @@ function listenForUserInput() {
     document.addEventListener(eventType, () => {
       console.log(`Event ${eventType} triggered, enabling transcription`);
       updateTranscriptionStatus(true);
-      msg.rate = 1;
     }, { once: true }); // Use once: true to prevent multiple bindings
   });
 }
@@ -388,7 +529,6 @@ if (document.readyState === 'loading') {
 // Draw video and canvas
 video.addEventListener("play", async () => {
       if (!transcriptEnabled) {
-        msg.text = "Please type any key to enable transcription.";
         updateTranscriptionStatus(true);
       }
 
@@ -417,91 +557,92 @@ video.addEventListener("play", async () => {
 
   // draw detections every 100ms
   setInterval(async () => {
-    // if (!transcriptEnabled) {
-    //   return;
-    // }
-
+    // Reset transcription status if no audio is playing
+    if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0) {
+      updateTranscriptionStatus(true);
+    }
     // Clear the canvas
     canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
 
     // Gesture detection and hand landmarks
     await detectGestures();
-  }, 500);
+  }, 100);
 });
 
-window.submitToHandwave = async function() {
-  // Clear out conitnuation text
+window.generateContinuation = async function() {
+  // Clear out continuation text
   document.getElementById('continuation').innerHTML = `<p style="color: #000;"></p>`;
 
   // Update UI
   gestureText.textContent = 'thinking...';
-
-  // Set continuation style
-  const urlParams = new URLSearchParams(window.location.search);
-  const styleOverride = urlParams.get('style');
-  let style = styleOverride || "funny and whimsical";
   
-  if (window.currentSource) {
-    window.currentSource.close();
+  // Close existing WebSocket connection if it exists
+  if (window.currentWebSocket) {
+    window.currentWebSocket.close();
   }
+
   const transcription = document.getElementById('transcription').textContent;
   console.log('Generating continuation for:', {
     transcription,
-    style,
-    url: '/api/handwave'
+    style
   });
-  // Creating EventSource connection
-  const source = new EventSource(`/api/handwave?transcription=${transcription}&style=${style}`);
-  window.currentSource = source;
 
-let continuationDiv = document.getElementById('continuation');
-let currentUtterance = null;
-let currentChunk = '';
-let lastBit = '';
-const synth = window.speechSynthesis;
+  // Create WebSocket connection
+  const ws = new WebSocket(`ws://${window.location.host}`);
+  window.currentWebSocket = ws;
 
-// On receiving each SSE, speak the next utterance/update next speech chunk as appropriate
-source.onmessage = function(event) {
-  updateTranscriptionStatus(false);
-  // console.log('Received message:', event.data);
-  
-  // Process message (previous last bit + new text - last bit, so words aren't split up)
-  const messageTextRaw = lastBit + JSON.parse(event.data);
-  const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
-  lastBit = messageTextRaw.split(' ').slice(-1)[0];
+  let continuationDiv = document.getElementById('continuation');
+  continuationDiv.innerHTML = `<p style="color: #000;"></p>`;
+  let currentChunk = '';
+  let firstChunk = true;
+  const synth = window.speechSynthesis;
 
-  continuationDiv.textContent += JSON.parse(event.data);
-  currentChunk += messageText;
+  ws.onopen = () => {
+    console.log('WebSocket connection established');
+    console.warn('Start with an empty audio queue');
+    audioQueue = []; // Queue to store audio elements
+    // Send the continuation request
+    ws.send(JSON.stringify({ transcription, style }));
+  };
 
-  if (!synth.speaking && currentChunk.length > 0) {
-    // If nothing is speaking, start speaking immediately
-    currentUtterance = new SpeechSynthesisUtterance(currentChunk);
-    currentUtterance.rate = 1.5;
-    currentUtterance.pitch = 1;
+  ws.onmessage = async function(event) {
+    console.log('Received WebSocket message:', event.data);
+    updateTranscriptionStatus(false);
     
-    // Set up onend handler before speaking
-    currentUtterance.onend = () => {
-      //console.log('Utterance finished');
-      // If we've accumulated more text while speaking, speak it now
-      if (currentChunk || lastBit) {  // Check for either accumulated text OR lastBit
-        const textToSpeak = currentChunk + ' ' + lastBit;  // Include lastBit
-        const nextUtterance = new SpeechSynthesisUtterance(textToSpeak);
-        nextUtterance.rate = 1.5;
-        nextUtterance.pitch = 1;
-        nextUtterance.onend = currentUtterance.onend; // Preserve the onend handler
-        currentUtterance = nextUtterance;
-        console.log('speaking accumulated chunk:', textToSpeak);
-        currentChunk = ''; // Clear the chunk before speaking
-        lastBit = '';
-        synth.speak(currentUtterance);
-      }
-    };
+    const data = JSON.parse(event.data);
+    
+    if (data.type === 'error') {
+      console.error('Error from server:', data.error);
+      return;
+    }
+    
+    if (data.type === 'complete') {
+      console.log('Handwave generation complete');
+      return;
+    }
+    
+    // Get the new text and update the display
+    const newText = data.text;
+    if (newText) {
+      continuationDiv.textContent = (continuationDiv.textContent || '') + newText;
+    }
+    console.log('adding new text to speech queue: ', newText);
+    speechQueue.push(newText);
 
-    currentChunk = ''; // Clear the chunk before speaking
-    synth.speak(currentUtterance);
-  }
+    if (!isSpeaking) {
+      console.log('processing speech queue');
+      processSpeechQueue();
+    } 
+  };
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+
+  ws.onclose = () => {
+    console.log('WebSocket connection closed');
+  };
 };
-
 
 // Initialize speech synthesis when the page loads
 document.addEventListener('DOMContentLoaded', () => {
@@ -509,10 +650,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const initSpeech = () => {
     // Try to initialize voices
     window.speechSynthesis.getVoices();
-    
-    // Create and immediately cancel an utterance to initialize the system
-    const testUtterance = new SpeechSynthesisUtterance('speech initialized');
-    window.speechSynthesis.speak(testUtterance);
     
     // Remove the event listeners once initialized
     document.removeEventListener('click', initSpeech);
@@ -525,47 +662,3 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', initSpeech);
   document.addEventListener('touchstart', initSpeech);
 });
-
-
-  // try {
-  //   const response = await fetch(`/api/handwave?transcription=${encodeURIComponent(transcription)}&style=${encodeURIComponent(style)}`, {
-  //     method: 'GET',
-  //     headers: {
-  //       'Content-Type': 'application/json',
-  //     }
-  //   });
-    
-  //   console.log('Response status:', response.status);
-  //   const responseText = await response.text();
-  //   console.log('Response text:', responseText);
-    
-  //   if (!response.ok) {
-  //     throw new Error(`Network response was not ok: ${response.status} ${responseText}`);
-  //   }
-    
-  //   const result = JSON.parse(responseText);
-    
-  //   // Speak continuation and update UI
-  //   if (result.continuation) {
-  //     const continuationDiv = document.getElementById('continuation');
-  //     continuationDiv.textContent = result.continuation;
-
-  //     //say(result.continuation);
-  //     console.log('saying:', result.continuation);
-  //     var msg = new SpeechSynthesisUtterance();
-  //     msg.rate = 1.5;
-  //     msg.pitch = 1;
-  //     msg.text = result.continuation;
-  //     window.speechSynthesis.speak(msg);
-
-  //   }
-  // } catch (error) {
-  //   console.error('Error:', error);
-  //   const continuationDiv = document.getElementById('continuation');
-  //   continuationDiv.textContent = `Error: ${error.message}`;
-  // }
-};
-
-// Add these variables at the top with other variables
-let lastGesture = "";
-let lastHandwave = "";

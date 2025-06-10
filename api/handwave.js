@@ -31,9 +31,11 @@ export default async function handler(req, res) {
     const style = req.query.style;
     
     try {
+      let styleText = style === 'default' ? 'humorous and whimsical style continuous with the previous speaker' :`${style} style otherwise continuous with the previous speaker`;
+      console.log('styleText: ', styleText);
       const message = `You are a helpful co-presenter, and are jumping in to continue
     a speech once the current speaker starts handwaving.
-    Please give a direct continuation of this fragment of a speech in a ${style} style.
+    Please give a direct continuation of this fragment of a speech in a ${styleText}.
     DO NOT include any stage directions, commentary, or preamble, and exclude the fragment itself: "${transcription}"`;
       
       let fullMessage = '';
