@@ -9,6 +9,9 @@ import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 
+// Load environment variables first
+dotenv.config();
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = express();
@@ -19,7 +22,7 @@ const wss = process.env.VERCEL_ENV === 'development'
   ? null 
   : new WebSocketServer({ 
       server,
-      path: '/',
+      path: '/ws',
       perMessageDeflate: false
     });
 
@@ -29,7 +32,6 @@ app.use(express.static("public"));
 app.set("view engine", "ejs");
 app.set("views", __dirname + "/public");
 
-dotenv.config();
 if (!process.env.VERCEL_ANTHROPIC_API_KEY) {
   console.error("VERCEL_ANTHROPIC_API_KEY is not set in environment variables");
   process.exit(1);
@@ -153,7 +155,7 @@ const port = process.env.PORT || 3000;
 
 const startServer = async (port) => {
   try {
-    server.listen(port, '0.0.0.0', () => {
+    server.listen(port, () => {
       console.log(`Server listening on port ${port}`);
     });
   } catch (error) {
