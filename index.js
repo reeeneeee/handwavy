@@ -16,7 +16,10 @@ dotenv.config();
 console.log('Environment variables:', {
   NODE_ENV: process.env.NODE_ENV,
   VERCEL_ANTHROPIC_API_KEY: process.env.VERCEL_ANTHROPIC_API_KEY ? 'set' : 'not set',
-  PORT: process.env.PORT
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ? 'set' : 'not set',
+  PORT: process.env.PORT,
+  // Log all environment variables (excluding sensitive values)
+  ALL_ENV_KEYS: Object.keys(process.env).join(', ')
 });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
