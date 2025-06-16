@@ -12,6 +12,13 @@ import http from 'http';
 // Load environment variables first
 dotenv.config();
 
+// Debug logging
+console.log('Environment variables:', {
+  NODE_ENV: process.env.NODE_ENV,
+  VERCEL_ANTHROPIC_API_KEY: process.env.VERCEL_ANTHROPIC_API_KEY ? 'set' : 'not set',
+  PORT: process.env.PORT
+});
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const app = express();
