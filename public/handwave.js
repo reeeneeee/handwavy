@@ -587,8 +587,8 @@ window.generateContinuation = async function() {
     style
   });
 
-  // Create WebSocket connection with new path
-  const ws = new WebSocket(`ws://${window.location.host}/ws`);
+  // Create WebSocket connection
+  const ws = new WebSocket(`ws://${window.location.host}`);
   window.currentWebSocket = ws;
 
   let continuationDiv = document.getElementById('continuation');
