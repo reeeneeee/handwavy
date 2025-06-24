@@ -14,14 +14,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const server = http.createServer(app);
 
-// Only create WebSocket server if we're not in Vercel's development environment
-const wss = process.env.VERCEL_ENV === 'development' 
-  ? null 
-  : new WebSocketServer({ 
-      server,
-      path: '/',
-      perMessageDeflate: false
-    });
+// Create WebSocket server for all environments
+const wss = new WebSocketServer({ 
+  server,
+  path: '/ws',
+  perMessageDeflate: false
+});
 
 app.use(morgan("tiny"));
 app.use(bodyParser.urlencoded({ extended: true }));
