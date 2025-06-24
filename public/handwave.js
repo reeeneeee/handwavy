@@ -11,7 +11,7 @@ let speechQueue = [];
 let currentChunk = '';
 let lastBit = '';
 let currentAudio = null; // Add this with other variables at the top
-let audioQueue;
+let audioQueue = [];
 const synth = window.speechSynthesis;
 
 // Set continuation style
@@ -121,8 +121,6 @@ async function processSpeechQueue() {
   isSpeaking = true;
   updateTranscriptionStatus(false);
   
-  
-  
   while (speechQueue.length > 0) {
     const chunk = speechQueue.shift();
     if (!chunk || chunk.trim().length === 0) continue;
@@ -153,6 +151,7 @@ async function processSpeechQueue() {
               if (nextAudio) {
                 nextAudio.play();
               }
+              console.log('Audio ended, audioQueue length:', audioQueue.length);
             }
 
             audio.onplay = () => {
@@ -178,7 +177,6 @@ async function processSpeechQueue() {
       const messageTextRaw = lastBit + chunk;
       const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
       lastBit = messageTextRaw.split(' ').slice(-1)[0];
-
       currentChunk += messageText;
       if (!synth.speaking && currentChunk.length > 0) {
         console.log('synth is not speaking and chunk is not empty:', currentChunk);
@@ -205,15 +203,14 @@ async function processSpeechQueue() {
             synth.speak(currentUtterance);
           }
           currentChunk = ''; // Clear the chunk before speaking
-          
        }
       }
     }
   }
   
   isSpeaking = false;
-  // Reset transcription status if no audio is playing and queue is empty
-  if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0) {
+  // Reset transcription status if no audio is playing and all queues are empty
+  if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0 && audioQueue.length === 0) {
     updateTranscriptionStatus(true);
   }
 }
@@ -595,8 +592,8 @@ video.addEventListener("play", async () => {
   setTimeout(() => {
     // draw detections every 100ms
     setInterval(async () => {
-      // Reset transcription status if no audio is playing
-      if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0) {
+      // Reset transcription status if no audio is playing and all queues are empty
+      if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0 && audioQueue.length === 0) {
         updateTranscriptionStatus(true);
       }
       // Clear the canvas
