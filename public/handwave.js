@@ -301,81 +301,103 @@ async function detectGestures() {
     return;
   }
 
+  // Check if video has valid dimensions
+  if (!video.videoWidth || !video.videoHeight || video.videoWidth === 0 || video.videoHeight === 0) {
+    console.log("Video dimensions not ready:", { width: video.videoWidth, height: video.videoHeight });
+    return;
+  }
+
+  // Check if canvas has valid dimensions
+  if (!canvas.width || !canvas.height || canvas.width === 0 || canvas.height === 0) {
+    console.log("Canvas dimensions not ready:", { width: canvas.width, height: canvas.height });
+    return;
+  }
+
+  // Check if video is playing and has data
+  if (video.readyState < video.HAVE_ENOUGH_DATA) {
+    console.log("Video not ready, state:", video.readyState);
+    return;
+  }
+
   const startTimeMs = performance.now();
-  const gestureResults = gestureRecognizer.recognizeForVideo(video, startTimeMs);
-  const handwaveResults = handwaveRecognizer.recognizeForVideo(video, startTimeMs);
+  let gestureResults, handwaveResults;
+  try {
+    gestureResults = gestureRecognizer.recognizeForVideo(video, startTimeMs);
+    handwaveResults = handwaveRecognizer.recognizeForVideo(video, startTimeMs);
 
-  if (gestureResults && gestureResults.gestures && gestureResults.gestures.length > 0 &&
-    handwaveResults && handwaveResults.gestures && handwaveResults.gestures.length > 0) {
-    const gesture = gestureResults.gestures[0][0];
-    const handwave = handwaveResults.gestures[0][0];
+    if (gestureResults && gestureResults.gestures && gestureResults.gestures.length > 0 &&
+      handwaveResults && handwaveResults.gestures && handwaveResults.gestures.length > 0) {
+      const gesture = gestureResults.gestures[0][0];
+      const handwave = handwaveResults.gestures[0][0];
 
-    if (gesture.categoryName !== lastGesture || handwave.categoryName !== lastHandwave) {
-      console.log("Detected gesture: ", gesture.categoryName, " | ", handwave.categoryName);
-      lastGesture = gesture.categoryName;
-      lastHandwave = handwave.categoryName;
+      if (gesture.categoryName !== lastGesture || handwave.categoryName !== lastHandwave) {
+        console.log("Detected gesture: ", gesture.categoryName, " | ", handwave.categoryName);
+        lastGesture = gesture.categoryName;
+        lastHandwave = handwave.categoryName;
 
-      if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {  
-        lastHandwaveTime = startTimeMs;
-      }
-    }
-    
-    // START GENERATING
-    if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
-      gestureText.textContent = "🫴 detected";
-
-      // Check if we're not already processing a handwave and cooldown has passed
-      if (!isProcessingHandwave
-      ) {
-        // Set the flag immediately to prevent multiple calls
-        isProcessingHandwave = true;
-        lastApiCallTime = startTimeMs;
-        console.log("commencing handwaving!");           
-        
-        try {
-          await window.generateContinuation();
-        } catch (error) {
-          console.error("Error in handwave processing:", error);
-          // Reset the flag on error
-          isProcessingHandwave = false;
-          lastApiCallTime = 0; // Reset the cooldown timer on error
-        } finally {
-          // Reset the flag when processing is complete
-          isProcessingHandwave = false;
+        if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {  
+          lastHandwaveTime = startTimeMs;
         }
-      } else {
-        const timeSinceLastCall = startTimeMs - lastApiCallTime;
-        console.log(`Skipping handwave - ${isProcessingHandwave ? 'already processing' : `cooldown active (${Math.round(timeSinceLastCall/1000)}s remaining)`}`);
-        console.log('time since handwave started', startTimeMs - lastHandwaveTime);
       }
-    } else if (gesture.categoryName === "Open_Palm") {   // STOP SPEAKING
-      gestureText.textContent = "✋ detected";
-      console.log("open palm detected, stopping current audio and restarting transcription");
       
-      // reset last handwave time
-      lastHandwaveTime = Infinity;
+      // START GENERATING
+      if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
+        gestureText.textContent = "🫴 detected";
 
-      // Cancel any ongoing speech synthesis or audio
-      window.speechSynthesis.cancel();
-      if (currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
+        // Check if we're not already processing a handwave and cooldown has passed
+        if (!isProcessingHandwave) {
+          // Set the flag immediately to prevent multiple calls
+          isProcessingHandwave = true;
+          lastApiCallTime = startTimeMs;
+          console.log("commencing handwaving!");           
+          
+          try {
+            await window.generateContinuation();
+          } catch (error) {
+            console.error("Error in handwave processing:", error);
+            // Reset the flag on error
+            isProcessingHandwave = false;
+            lastApiCallTime = 0; // Reset the cooldown timer on error
+          } finally {
+            // Reset the flag when processing is complete
+            isProcessingHandwave = false;
+          }
+        } else {
+          const timeSinceLastCall = startTimeMs - lastApiCallTime;
+          console.log(`Skipping handwave - ${isProcessingHandwave ? 'already processing' : `cooldown active (${Math.round(timeSinceLastCall/1000)}s remaining)`}`);
+          console.log('time since handwave started', startTimeMs - lastHandwaveTime);
+        }
+      } else if (gesture.categoryName === "Open_Palm") {   // STOP SPEAKING
+        gestureText.textContent = "✋ detected";
+        console.log("open palm detected, stopping current audio and restarting transcription");
+        
+        // reset last handwave time
+        lastHandwaveTime = Infinity;
+
+        // Cancel any ongoing speech synthesis or audio
+        window.speechSynthesis.cancel();
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio = null;
+        }
+        isSpeaking = false;
+        // Clear the speech queue
+        speechQueue = [];
+
+        // Reset flags
+        isProcessingHandwave = false;
+        lastApiCallTime = 0; // Reset the cooldown timer on error
+        document.getElementById('transcription').innerHTML = '';
+        document.getElementById('continuation').innerHTML = '';
+        updateTranscriptionStatus(true);
+      } else {
+        lastHandwaveTime = Infinity;
+        gestureText.textContent = "";
       }
-      isSpeaking = false;
-      // Clear the speech queue
-      speechQueue = [];
-
-      // Reset flags
-      isProcessingHandwave = false;
-      lastApiCallTime = 0; // Reset the cooldown timer on error
-      document.getElementById('transcription').innerHTML = '';
-      document.getElementById('continuation').innerHTML = '';
-      updateTranscriptionStatus(true);
-    } else {
-      lastHandwaveTime = Infinity;
-
-      gestureText.textContent = "";
     }
+  } catch (error) {
+    console.error("Error in gesture detection:", error);
+    // Don't throw the error, just log it and continue
   }
 
   // Draw hand landmarks if available
@@ -528,9 +550,20 @@ if (document.readyState === 'loading') {
 
 // Draw video and canvas
 video.addEventListener("play", async () => {
-      if (!transcriptEnabled) {
-        updateTranscriptionStatus(true);
-      }
+  if (!transcriptEnabled) {
+    updateTranscriptionStatus(true);
+  }
+
+  // Wait for video to have dimensions before creating canvas
+  await new Promise((resolve) => {
+    if (video.videoWidth && video.videoHeight) {
+      resolve();
+    } else {
+      video.addEventListener('loadedmetadata', resolve, { once: true });
+    }
+  });
+
+  console.log('Video dimensions:', { width: video.videoWidth, height: video.videoHeight });
 
   canvas = faceapi.createCanvasFromMedia(video);
 
@@ -553,20 +586,26 @@ video.addEventListener("play", async () => {
     console.error('Error starting speech recognition:', error);
   }
 
-  faceapi.matchDimensions(canvas, { height: video.height, width: video.width });
+  // Ensure canvas dimensions match video
+  faceapi.matchDimensions(canvas, { height: video.videoHeight, width: video.videoWidth });
+  
+  console.log('Canvas dimensions after matching:', { width: canvas.width, height: canvas.height });
 
-  // draw detections every 100ms
-  setInterval(async () => {
-    // Reset transcription status if no audio is playing
-    if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0) {
-      updateTranscriptionStatus(true);
-    }
-    // Clear the canvas
-    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  // Wait a bit for video to be fully ready before starting gesture detection
+  setTimeout(() => {
+    // draw detections every 100ms
+    setInterval(async () => {
+      // Reset transcription status if no audio is playing
+      if (!currentAudio && !window.speechSynthesis.speaking && speechQueue.length === 0) {
+        updateTranscriptionStatus(true);
+      }
+      // Clear the canvas
+      canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
 
-    // Gesture detection and hand landmarks
-    await detectGestures();
-  }, 100);
+      // Gesture detection and hand landmarks
+      await detectGestures();
+    }, 100);
+  }, 1000); // Wait 1 second for video to be ready
 });
 
 window.generateContinuation = async function() {
