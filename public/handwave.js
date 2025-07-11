@@ -1,29 +1,63 @@
+// Imports
 import { GestureRecognizer, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js';
 
+// DOM elements
 const video = document.getElementById("video");
 let canvas;
 
+// Application state variables
 let transcriptEnabled = false; // Start with transcription disabled
-let lastGesture = "";
-let lastHandwave = "";
 let isSpeaking = false;
 let speechQueue = [];
 let currentChunk = '';
 let lastBit = '';
-let currentAudio = null; // Add this with other variables at the top
+let currentAudio = null; // Current playing audio element
 let audioQueue = [];
 const synth = window.speechSynthesis;
-
-// Set continuation style
-const urlParams = new URLSearchParams(window.location.search);
-const styleOverride = urlParams.get('style');
-let style = styleOverride || "funny and whimsical";
-const voiceId = urlParams.get('voiceId');
-
-// Add at the top with other variables
 let speechSynthesisInitialized = false;
 
-// Function: start webcam
+// Gesture detection state
+let lastGesture = "";
+let lastHandwave = "";
+let isProcessingHandwave = false;
+let lastHandwaveTime = 0;
+let lastApiCallTime = 0;
+const API_CALL_COOLDOWN = 5000; // 5 seconds between API calls
+
+// URL parameters for customization
+const urlParams = new URLSearchParams(window.location.search);
+let style = urlParams.get('style') || "funny and whimsical";
+const voiceId = urlParams.get('voiceId');
+
+// Initialize gesture recognizers
+let gestureRecognizer, handwaveRecognizer;
+let runningMode = "VIDEO";
+
+// Load handwave recognizer
+async function createHandwaveRecognizer() {
+  const vision = await FilesetResolver.forVisionTasks("./wasm");
+  handwaveRecognizer = await GestureRecognizer.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "./models/handwave_recognizer.task"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
+  });
+}
+
+// Load default gesture recognizer
+async function createGestureRecognizer() {
+  const vision = await FilesetResolver.forVisionTasks("./wasm");
+  gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: "./models/gesture_recognizer.task"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
+  });
+}
+
+// Start webcam for video input
 function startWebcam() {
   navigator.mediaDevices
     .getUserMedia({
@@ -34,17 +68,16 @@ function startWebcam() {
       video.srcObject = stream;
     })
     .catch((error) => {
-      console.error(error);
+      console.error('Error accessing webcam:', error);
     });
 }
 
-// Function: update transcription status
+// Toggle transcription status
 function updateTranscriptionStatus(enabled) {
-  // update transcription status
   transcriptEnabled = enabled;
   console.log("Transcription status updated to:", enabled);
 
-  // update transcription status UI
+  // Update UI indicators
   const indicator = document.getElementById('status-indicator');
   const statusText = document.getElementById('transcription-status-text');
  
@@ -52,7 +85,7 @@ function updateTranscriptionStatus(enabled) {
     indicator.classList.add('active');
     statusText.textContent = 'Transcription enabled';
 
-    // clear transcript and ui
+    // Clear transcript and UI
     finalTranscript = '';
     gestureText.textContent = '';
 
@@ -81,7 +114,7 @@ function updateTranscriptionStatus(enabled) {
   }
 }
 
-// Function to play audio from our TTS endpoint
+// TTS handling
 async function playAudio(text) {
   // Don't try to play empty text
   if (!text || text.trim().length === 0) {
@@ -90,7 +123,7 @@ async function playAudio(text) {
   }
 
   try {
-    console.log('Playing text:', text); // Debug log
+    console.log('Playing text:', text);
     const response = await fetch(`/api/tts?text=${encodeURIComponent(text.trim())}&voiceId=${voiceId}`);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
@@ -114,7 +147,7 @@ async function playAudio(text) {
   }
 }
 
-// Function to process the speech queue
+// Process speech queue for TTS and speech synthesis
 async function processSpeechQueue() {
   if (isSpeaking || speechQueue.length === 0) return;
   
@@ -126,85 +159,11 @@ async function processSpeechQueue() {
     if (!chunk || chunk.trim().length === 0) continue;
 
     if (voiceId) {
-      let stopCharMatch = chunk.match(new RegExp('[\\.\\!\\?]+'));
-      if (stopCharMatch != null) {
-        console.log('stop chars found, speaking', chunk);
-        // Only include lastBit if it's not empty
-        let chunkToSpeak = (lastBit ? lastBit + ' ' : '') + chunk.slice(0, stopCharMatch.index + 1) + stopCharMatch[0];
-        lastBit = chunk.slice(stopCharMatch.index + stopCharMatch[0].length, chunk.length);
-
-        console.log('chunkToSpeak is:', chunkToSpeak);
-        console.log('reset lastBit to:', lastBit);
-        updateTranscriptionStatus(false);
-
-        // Make API call immediately and add to audio queue
-        try {
-          console.log('adding audio for chunk to queue: ', chunkToSpeak);
-            const response = await fetch(`/api/tts?text=${encodeURIComponent(chunkToSpeak.trim())}&voiceId=${voiceId}`);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const audio = new Audio();
-            audio.src = URL.createObjectURL(await response.blob());
-
-            audio.onended = () => {
-              currentAudio = null;
-              let nextAudio = audioQueue.shift();
-              if (nextAudio) {
-                nextAudio.play();
-              }
-              console.log('Audio ended, audioQueue length:', audioQueue.length);
-            }
-
-            audio.onplay = () => {
-              currentAudio = audio;
-            }
-
-            if (currentAudio == null) {
-              audio.play();
-            } else {
-              audioQueue.push(audio);
-            }
-
-            console.warn('audioQueue:', audioQueue);
-        } catch (error) {
-            console.error('Error preparing audio:', error);
-        }
-      } else {
-        console.log('no period, adding to lastBit:', chunk);
-        lastBit += chunk;
-      }
+      // Use ElevenLabs TTS
+      await processWithElevenLabs(chunk);
     } else {
-      console.log('processing with speechsynthesis default')
-      const messageTextRaw = lastBit + chunk;
-      const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
-      lastBit = messageTextRaw.split(' ').slice(-1)[0];
-      currentChunk += messageText;
-      if (!synth.speaking && currentChunk.length > 0) {
-        console.log('synth is not speaking and chunk is not empty:', currentChunk);
-        // If nothing is speaking, start speaking immediately
-        let currentUtterance = new SpeechSynthesisUtterance(currentChunk);
-        currentUtterance.rate = 1.5;
-        currentUtterance.pitch = 1;
-        synth.speak(currentUtterance);
-        // Set up onend handler before speaking
-        currentUtterance.onend = () => {
-          console.log('Utterance finished');
-          // If we've accumulated more text while speaking, speak it now
-          if (currentChunk || lastBit) {  // Check for either accumulated text OR lastBit
-            console.log('speaking accumulated chunk:', currentChunk);
-            const textToSpeak = currentChunk + ' ' + lastBit;  // Include lastBit
-            const nextUtterance = new SpeechSynthesisUtterance(textToSpeak);
-            nextUtterance.rate = 1.5;
-            nextUtterance.pitch = 1;
-            nextUtterance.onend = currentUtterance.onend; // Preserve the onend handler
-            currentUtterance = nextUtterance;
-            console.log('speaking accumulated chunk:', textToSpeak);
-            currentChunk = ''; // Clear the chunk before speaking
-            lastBit = '';
-            synth.speak(currentUtterance);
-          }
-          currentChunk = ''; // Clear the chunk before speaking
-       }
-      }
+      // Use browser speech synthesis
+      await processWithSpeechSynthesis(chunk);
     }
   }
   
@@ -215,38 +174,95 @@ async function processSpeechQueue() {
   }
 }
 
-// Initialize gesture recognizer
-let gestureRecognizer, handwaveRecognizer;
-let runningMode = "VIDEO";
-async function createHandwaveRecognizer() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "./wasm"
-  );
-  handwaveRecognizer = await GestureRecognizer.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "./models/handwave_recognizer.task"
-    },
-    runningMode: "VIDEO",
-    numHands: 2
-  });
-}
-async function createGestureRecognizer() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "./wasm"
-  );
-  gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: "./models/gesture_recognizer.task"
-    },
-    runningMode: "VIDEO",
-    numHands: 2
-  });
+// Process speech with ElevenLabs TTS
+async function processWithElevenLabs(chunk) {
+  let stopCharMatch = chunk.match(new RegExp('[\\.\\!\\?]+'));
+  if (stopCharMatch != null) {
+    console.log('stop chars found, speaking', chunk);
+    // Only include lastBit if it's not empty
+    let chunkToSpeak = (lastBit ? lastBit + ' ' : '') + chunk.slice(0, stopCharMatch.index + 1) + stopCharMatch[0];
+    lastBit = chunk.slice(stopCharMatch.index + stopCharMatch[0].length, chunk.length);
+
+    console.log('chunkToSpeak is:', chunkToSpeak);
+    console.log('reset lastBit to:', lastBit);
+    updateTranscriptionStatus(false);
+
+    // Make API call immediately and add to audio queue
+    try {
+      console.log('adding audio for chunk to queue: ', chunkToSpeak);
+      const response = await fetch(`/api/tts?text=${encodeURIComponent(chunkToSpeak.trim())}&voiceId=${voiceId}`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const audio = new Audio();
+      audio.src = URL.createObjectURL(await response.blob());
+
+      audio.onended = () => {
+        currentAudio = null;
+        let nextAudio = audioQueue.shift();
+        if (nextAudio) {
+          nextAudio.play();
+        }
+        console.log('Audio ended, audioQueue length:', audioQueue.length);
+      }
+
+      audio.onplay = () => {
+        currentAudio = audio;
+      }
+
+      if (currentAudio == null) {
+        audio.play();
+      } else {
+        audioQueue.push(audio);
+      }
+
+      console.warn('audioQueue:', audioQueue);
+    } catch (error) {
+      console.error('Error preparing audio:', error);
+    }
+  } else {
+    console.log('no period, adding to lastBit:', chunk);
+    lastBit += chunk;
+  }
 }
 
-let lastApiCallTime = 0;
-const API_CALL_COOLDOWN = 5000; // 5 seconds between API calls
+// Process speech with browser speech synthesis
+async function processWithSpeechSynthesis(chunk) {
+  console.log('processing with speechsynthesis default')
+  const messageTextRaw = lastBit + chunk;
+  const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
+  lastBit = messageTextRaw.split(' ').slice(-1)[0];
+  currentChunk += messageText;
+  
+  if (!synth.speaking && currentChunk.length > 0) {
+    console.log('synth is not speaking and chunk is not empty:', currentChunk);
+    // If nothing is speaking, start speaking immediately
+    let currentUtterance = new SpeechSynthesisUtterance(currentChunk);
+    currentUtterance.rate = 1.5;
+    currentUtterance.pitch = 1;
+    synth.speak(currentUtterance);
+    
+    // Set up onend handler before speaking
+    currentUtterance.onend = () => {
+      console.log('Utterance finished');
+      // If we've accumulated more text while speaking, speak it now
+      if (currentChunk || lastBit) {
+        console.log('speaking accumulated chunk:', currentChunk);
+        const textToSpeak = currentChunk + ' ' + lastBit;  // Include lastBit
+        const nextUtterance = new SpeechSynthesisUtterance(textToSpeak);
+        nextUtterance.rate = 1.5;
+        nextUtterance.pitch = 1;
+        nextUtterance.onend = currentUtterance.onend; // Preserve the onend handler
+        currentUtterance = nextUtterance;
+        console.log('speaking accumulated chunk:', textToSpeak);
+        currentChunk = ''; // Clear the chunk before speaking
+        lastBit = '';
+        synth.speak(currentUtterance);
+      }
+      currentChunk = ''; // Clear the chunk before speaking
+    }
+  }
+}
 
-// Add function to draw hand landmarks
+// Display hand landmarks on canvas
 function drawHandLandmarks(ctx, landmarks) {
   if (!landmarks) return;
   
@@ -283,11 +299,8 @@ function drawHandLandmarks(ctx, landmarks) {
 }
 
 const gestureText = document.getElementById("gesture");
-// Add a flag to track if we're currently processing a handwave
-let isProcessingHandwave = false;
-let lastHandwaveTime = 0;
 
-// Function to detect gestures
+// Main gesture detection function
 async function detectGestures() {
   if (!gestureRecognizer || !handwaveRecognizer) {
     console.log("Gesture recognizers not initialized");
@@ -318,6 +331,7 @@ async function detectGestures() {
 
   const startTimeMs = performance.now();
   let gestureResults, handwaveResults;
+  
   try {
     gestureResults = gestureRecognizer.recognizeForVideo(video, startTimeMs);
     handwaveResults = handwaveRecognizer.recognizeForVideo(video, startTimeMs);
@@ -337,12 +351,12 @@ async function detectGestures() {
         }
       }
       
-      // START GENERATING
+      // Handle handwave detection - START GENERATING
       if (gesture.categoryName === "None" && handwave.categoryName === "handwave") {   
         gestureText.textContent = "🫴 detected";
 
         // Check if we're not already processing a handwave and cooldown has passed
-        if (!isProcessingHandwave) {
+        if (!isProcessingHandwave && startTimeMs - lastApiCallTime > API_CALL_COOLDOWN) {
           // Set the flag immediately to prevent multiple calls
           isProcessingHandwave = true;
           lastApiCallTime = startTimeMs;
@@ -416,6 +430,7 @@ function initializeSpeechSynthesis() {
     speechSynthesisInitialized = true;
     return;
   }
+  
   startButton.addEventListener('click', async () => {
     console.log("Initializing speech synthesis");
     
@@ -436,24 +451,13 @@ function initializeSpeechSynthesis() {
   });
 }
 
-// Initialization
-Promise.all([
-  createGestureRecognizer(),
-  createHandwaveRecognizer()
-]).then(() => {
-  startWebcam();
-  initializeSpeechSynthesis();
-});
-
-// Speech recognition setup
-const SpeechRecognition =
-  window.SpeechRecognition || window.webkitSpeechRecognition;
-const SpeechGrammarList =
-  window.SpeechGrammarList || window.webkitSpeechGrammarList;
-const SpeechRecognitionEvent =
-  window.SpeechRecognitionEvent || window.webkitSpeechRecognitionEvent;
+// Initialize speech recognition
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const SpeechGrammarList = window.SpeechGrammarList || window.webkitSpeechGrammarList;
+const SpeechRecognitionEvent = window.SpeechRecognitionEvent || window.webkitSpeechRecognitionEvent;
 const recognition = new SpeechRecognition();
 const speechRecognitionList = new SpeechGrammarList();
+
 recognition.grammars = speechRecognitionList;
 recognition.continuous = true;
 recognition.lang = "en-US";
@@ -465,7 +469,7 @@ const transcriptionDiv = document.getElementById('transcription');
 let interimTranscript = '';
 let finalTranscript = '';
 
-// Handle speech recognition results
+// Handle transcription increments
 recognition.onresult = (event) => {
   if (!transcriptEnabled) {
     console.log("Skipping transcription");
@@ -498,7 +502,7 @@ recognition.onresult = (event) => {
   }
 };
 
-// Handle errors
+// Handle speech recognition errors
 recognition.onerror = (event) => {
   console.error('Speech recognition error:', event.error);
 
@@ -514,7 +518,7 @@ recognition.onerror = (event) => {
   }
 };
 
-// Add handler for when recognition ends unexpectedly
+// Handle speech recognition end events
 recognition.onend = () => {
   if (transcriptEnabled) {
     console.log("Recognition ended, attempting to restart");
@@ -526,7 +530,7 @@ recognition.onend = () => {
   }
 };
 
-// listen for user input to enable speech synthesis and transcription
+// Listen for user input to enable speech synthesis and transcription (required on mobile)
 function listenForUserInput() {
   const events = ["click", "touchstart", "keydown"];
   events.forEach(eventType => {
@@ -537,15 +541,7 @@ function listenForUserInput() {
   });
 }
 
-// Call setupEventListeners when the document is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', listenForUserInput);
-} else {
-  listenForUserInput();
-}
-
-
-// Draw video and canvas
+// Set up video and canvas when video starts playing
 video.addEventListener("play", async () => {
   if (!transcriptEnabled) {
     updateTranscriptionStatus(true);
@@ -605,6 +601,7 @@ video.addEventListener("play", async () => {
   }, 1000); // Wait 1 second for video to be ready
 });
 
+// Generate AI continuation of speech via WebSocket
 window.generateContinuation = async function() {
   // Clear out continuation text
   document.getElementById('continuation').innerHTML = `<p style="color: #000;"></p>`;
@@ -680,6 +677,22 @@ window.generateContinuation = async function() {
     console.log('WebSocket connection closed');
   };
 };
+
+// Once gesture recognizers are loaded, start webcam and initialize speech synthesis
+Promise.all([
+  createGestureRecognizer(),
+  createHandwaveRecognizer()
+]).then(() => {
+  startWebcam();
+  initializeSpeechSynthesis();
+});
+
+// Start listening for user input when the document is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', listenForUserInput);
+} else {
+  listenForUserInput();
+}
 
 // Initialize speech synthesis when the page loads
 document.addEventListener('DOMContentLoaded', () => {

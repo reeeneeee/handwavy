@@ -7,7 +7,7 @@ Perfect for nervous and ill-prepared public speakers, or anyone who wants seamle
 ## How It Works
 
 - **Begin Speaking**: Begin your presentation or speech naturally
-- **Handwave**: Whenever you want the AI to continue, simply begin waving your hands
+- **Handwave**: Whenever you want the AI to take over, simply begin waving your hands
 - **(optional) Style customization**: The default style of the continuation is "funny and whimsical", but this can be overridden with any natural language description using the `style` URL parameter
 - **AI Continuation**: Once the system detects your handwaving gesture, it transmits the transcript so far and asks Claude to continue your speech in the same style
 - **Voice Synthesis**: Listen as the generated continuation is vocalized (using Web Speech API by default, and an ElevenLabs voice if the `voiceId` URL param is provided)
