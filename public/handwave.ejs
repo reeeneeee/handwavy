@@ -4,92 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="icon" type="image/x-icon" href="./assets/favicon.ico" />
-  <title>~handwavy~</title>
+    <title>~handwavy~</title>
+    
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
+    <script defer src="./assets/js/face-api.min.js"></script>
+  
+    <script type="module" defer src="./handwave.js"></script>
+    
+    <link rel="stylesheet" href="./assets/css/style.css" />
+    
+    <script>
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((localMediaStream) => {
+          const video = document.querySelector("video");
+          video.srcObject = localMediaStream;
+        })
+        .catch((error) => {
+          console.log("Rejected!", error);
+        });
+    </script>
   </head>
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.js" crossorigin="anonymous"></script>
-  <script defer src="./assets/js/face-api.min.js"></script>
-  <script type="module" defer src="./handwave.js"></script>
-  <script>
-    navigator.mediaDevices
-    .getUserMedia({ video: true, audio: true })
-    .then((localMediaStream) => {
-      const video = document.querySelector("video");
-      video.srcObject = localMediaStream;
-    })
-    .catch((error) => {
-      console.log("Rejected!", error);
-    });
-  </script>
-  <link rel="stylesheet" href="./assets/css/style.css" />
-  <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow-x: hidden;
-      position: relative;
-    }
-    body {
-      padding: 20px 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
-    .main-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      width: 100%;
-      max-width: 800px;
-      margin: 0 auto;
-      padding-top: 20px;
-      position: relative;
-      z-index: 1;
-    }
-    #gesture {
-      margin: 10px 0px;
-      padding: 10px;
-      background-color: #f0f0f0;
-      border-radius: 5px;
-      text-align: center;
-      font-size: 1.2em;
-      width: 100%;
-    }
-    .video-container {
-      position: relative;
-      width: 100%;
-      height: 600px;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      overflow: hidden;
-    }
-    #video {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      max-width: 800px;
-      margin: auto;
-    }
-    .transcription-status {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin: 10px 0;
-      font-size: 0.9em;
-      color: #666;
-    }
-    .status-indicator {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background-color: #ccc;
-      transition: background-color 0.3s ease;
-    }
-    .status-indicator.active {
-      background-color: #4CAF50;
-    }
-  </style>
+  
   <body>
     <div class="main-container">
 
@@ -97,7 +33,10 @@
         <video id="video" autoplay playsinline></video>
       </div>
 
-      <h2 id="gesture" style="color: #ff0088;" width="100%"> begin speaking whenever you're ready <br> handwave 🫴 to automatically continue the thought </h2>
+      <h2 id="gesture" style="color: #ff0088;" width="100%"> 
+        begin speaking whenever you're ready <br> 
+        handwave 🫴 to automatically continue the thought 
+      </h2>
       
       <div class="transcription-status">
         <div id="status-indicator" class="status-indicator"></div>
