@@ -150,7 +150,7 @@ const StateManager = {
   },
 
   updateTranscriptionStatus(isEnabled) {
-    console.info('Updating transcription status to:', isEnabled);
+    // console.info('Updating transcription status to:', isEnabled);
     AppState.transcription.enabled = isEnabled;
     
     // Ensure DOM is initialized
@@ -309,18 +309,16 @@ async function processWithElevenLabs(chunk) {
   const speakableChunk = fullText.match(/^.*[a-zA-Z]+.*[.!?;:,-]/)
 
   if (speakableChunk != null) {
-    console.log('stop chars found, speaking', chunk);
     // Only include lastBit if it's not empty
     let chunkToSpeak = speakableChunk[0];
     AppState.speech.lastBit = fullText.slice(chunkToSpeak.length);
-    console.log('chunkToSpeak is:', chunkToSpeak);
-         console.log('reset lastBit to:', AppState.speech.lastBit);
-         StateManager.updateTranscriptionStatus(false);
+    console.info('chunkToSpeak:', chunkToSpeak);
+    console.info('Updated lastBit:', AppState.speech.lastBit);
+    StateManager.updateTranscriptionStatus(false);
 
     // Make API call immediately and add to audio queue
     try {
-      console.log('adding audio for chunk to queue: ', chunkToSpeak);
-             const response = await fetch(`/api/tts?text=${encodeURIComponent(chunkToSpeak.trim())}&voiceId=${AppState.config.voiceId}`);
+      const response = await fetch(`/api/tts?text=${encodeURIComponent(chunkToSpeak.trim())}&voiceId=${AppState.config.voiceId}`);
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const audio = new Audio();
       audio.src = URL.createObjectURL(await response.blob());
@@ -332,7 +330,7 @@ async function processWithElevenLabs(chunk) {
         } else {
           AppState.speech.currentAudio = null;
         }
-        console.log('Audio ended, audioQueue length:', AppState.speech.audioQueue.length);
+        console.info('Audio ended, audioQueue length:', AppState.speech.audioQueue.length);
       }
 
       audio.onplay = () => {
@@ -344,47 +342,41 @@ async function processWithElevenLabs(chunk) {
              } else {
          AppState.speech.audioQueue.push(audio);
        }
-
-             console.warn('audioQueue:', AppState.speech.audioQueue);
     } catch (error) {
       console.error('Error preparing audio:', error);
     }
   } else {
-    console.log('no period, adding to lastBit:', chunk);
-    AppState.speech.lastBit += chunk;
+    console.warn('no speakable chunk, appending to lastBit:', chunk);
+    AppState.speech.lastBit = fullText;
   }
 }
 
 // Process speech with browser speech synthesis
 async function processWithSpeechSynthesis(chunk) {
-  console.log('processing with speechsynthesis default')
   const messageTextRaw = AppState.speech.lastBit + chunk;
   const messageText = ' ' + messageTextRaw.split(' ').slice(0, -1).join(' ');
   AppState.speech.lastBit = messageTextRaw.split(' ').slice(-1)[0];
   AppState.speech.currentChunk += messageText;
   
   if (!window.speechSynthesis.speaking && AppState.speech.currentChunk.length > 0) {
-    console.log('synth is not speaking and chunk is not empty:', AppState.speech.currentChunk.length);
     // If nothing is speaking, start speaking immediately
     let currentUtterance = new SpeechSynthesisUtterance(AppState.speech.currentChunk);
     currentUtterance.rate = 1.5;
     currentUtterance.pitch = 1;
-    console.log('speaking chunk:', AppState.speech.currentChunk);
     window.speechSynthesis.speak(currentUtterance);
     
     // Set up onend handler before speaking
     currentUtterance.onend = () => {
-      console.log('Utterance finished');
+      console.info('Utterance finished');
       // If we've accumulated more text while speaking, speak it now
       if (AppState.speech.currentChunk.length || AppState.speech.lastBit) {
-        console.log('speaking accumulated chunk:', AppState.speech.currentChunk);
         const textToSpeak = AppState.speech.currentChunk + ' ' + AppState.speech.lastBit;  // Include lastBit
         const nextUtterance = new SpeechSynthesisUtterance(textToSpeak);
         nextUtterance.rate = 1.5;
         nextUtterance.pitch = 1;
         nextUtterance.onend = currentUtterance.onend; // Preserve the onend handler
         currentUtterance = nextUtterance;
-        console.log('speaking accumulated chunk:', textToSpeak);
+        console.info('speaking accumulated chunk:', currentUtterance);
         AppState.speech.currentChunk = ''; // Clear the chunk before speaking
         AppState.speech.lastBit = '';
         window.speechSynthesis.speak(currentUtterance);
