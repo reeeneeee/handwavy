@@ -241,41 +241,8 @@ function startWebcam() {
     });
 }
 
-// TTS handling
-async function playAudio(text) {
-  // Don't try to play empty text
-  if (!text || text.trim().length === 0) {
-    console.info('Skipping empty text');
-    return;
-  }
-
-  try {
-    console.info('Playing chunk:', text);
-    const response = await fetch(`/api/tts?text=${encodeURIComponent(text.trim())}&voiceId=${AppState.config.voiceId}`);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    // Create an audio element and play the stream
-    const audio = new Audio();
-    currentAudio = audio; // Store reference to current audio
-    audio.src = URL.createObjectURL(await response.blob());
-    
-    // Return a promise that resolves when the audio finishes playing
-    return new Promise((resolve) => {
-      audio.onended = () => {
-        currentAudio = null; // Clear reference when audio ends
-        resolve();
-      };
-      audio.play();
-    });
-  } catch (error) {
-    console.error('Error playing audio:', error);
-  }
-}
-
 // Process speech queue for TTS and speech synthesis
-async function processSpeechQueue() {
+async function maybeProcessSpeechQueue() {
   if (AppState.speech.isSpeaking || AppState.speech.queue.length === 0) return;
   
   AppState.speech.isSpeaking = true;
@@ -739,12 +706,8 @@ video.addEventListener("play", async () => {
       // Gesture detection and hand landmarks
       await detectGestures();
 
-      if (AppState.speech.queue.length > 0) {
-        processSpeechQueue();
-      }
-      if (AppState.speech.speakableChunks.length > 0) {
-        processSpeakableChunks();
-      }
+      // Process speech queue if nonempty
+      maybeProcessSpeechQueue();
     }, 100);
   }, 1000); // Wait 1 second for video to be ready
 });
